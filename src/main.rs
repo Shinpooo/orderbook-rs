@@ -5,6 +5,8 @@ use std::{
     rc::Rc,
 };
 
+use tokio::net::TcpListener;
+
 macro_rules! log_match {
     ($side:expr, $taker_id:expr, $maker_id:expr, $price:expr, $amount:expr) => {
         println!(
@@ -326,19 +328,44 @@ impl Orderbook {
     }
 }
 
-fn main() {
-    let mut orderbook: Orderbook = Orderbook::new();
-    let new_order: Order = Order::new(1, 5.5, 30.0, Side::BUY);
-    orderbook.insert_order(new_order);
-    orderbook.bids.print_level(5.5);
-    orderbook.asks.print_level(30.0);
-    let new_order: Order = Order::new(2, 5.5, 30.0, Side::BUY);
-    orderbook.insert_order(new_order);
-    orderbook.bids.print_level(5.5);
-    orderbook.cancel_order(1);
-    orderbook.bids.print_level(5.5);
-    orderbook.cancel_order(2);
-    orderbook.bids.print_level(5.5);
+#[tokio::main]
+async fn main() {
+    let address = "127.0.0.1:8000";
+    let listener: Result<TcpListener, std::io::Error> = TcpListener::bind(&address).await;
+    let listener = match listener {
+        Ok(listener) => {
+            println!("TCP Listener binded to {}", address);
+            listener
+        }
+        Err(e) => {
+            println!("Failed to bind to {}, Error: {}", address, e);
+            return;
+        }
+    };
+
+    loop {
+        let stream: tokio::net::TcpStream = match listener.accept().await {
+            Ok((tcp_stream, address)) => tcp_stream,
+            Err(e) => {
+                println!("An error happened {}", e);
+                return;
+            }
+        };
+    }
+
+    while let Ok((stream, _)) = listener.accept().await {}
+    // let mut orderbook: Orderbook = Orderbook::new();
+    // let new_order: Order = Order::new(1, 5.5, 30.0, Side::BUY);
+    // orderbook.insert_order(new_order);
+    // orderbook.bids.print_level(5.5);
+    // orderbook.asks.print_level(30.0);
+    // let new_order: Order = Order::new(2, 5.5, 30.0, Side::BUY);
+    // orderbook.insert_order(new_order);
+    // orderbook.bids.print_level(5.5);
+    // orderbook.cancel_order(1);
+    // orderbook.bids.print_level(5.5);
+    // orderbook.cancel_order(2);
+    // orderbook.bids.print_level(5.5);
 }
 
 #[cfg(test)]
