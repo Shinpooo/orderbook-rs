@@ -5,8 +5,8 @@ use std::{
     rc::Rc,
 };
 
-use tokio::net::TcpListener;
-
+use futures_util::{future, StreamExt, TryStreamExt};
+use tokio::net::{TcpListener, TcpStream};
 macro_rules! log_match {
     ($side:expr, $taker_id:expr, $maker_id:expr, $price:expr, $amount:expr) => {
         println!(
@@ -328,6 +328,34 @@ impl Orderbook {
     }
 }
 
+async fn accept_connection(stream: TcpStream) {
+    let peer_address = stream.peer_addr().expect("Peer should have an address.");
+    println!("Peer address: {}", peer_address);
+
+    let ws_stream = tokio_tungstenite::accept_async(stream)
+        .await
+        .expect("Error during the websocket handshake");
+
+    print!("New websocket connection established.");
+
+    let (write, mut read) = ws_stream.split();
+
+    loop {
+        match read.next().await {
+            Some(Ok(msg)) => {
+                println!("Received message: {}", msg);
+            }
+            Some(Err(e)) => {
+                println!("Received error: {}", e);
+            }
+            None => {
+                println!("Received None msg, closing connection");
+                break;
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let address = "127.0.0.1:8000";
@@ -345,15 +373,15 @@ async fn main() {
 
     loop {
         let stream: tokio::net::TcpStream = match listener.accept().await {
-            Ok((tcp_stream, address)) => tcp_stream,
+            Ok((tcp_stream, _)) => tcp_stream,
             Err(e) => {
                 println!("An error happened {}", e);
                 return;
             }
         };
+        tokio::spawn(accept_connection(stream));
     }
 
-    while let Ok((stream, _)) = listener.accept().await {}
     // let mut orderbook: Orderbook = Orderbook::new();
     // let new_order: Order = Order::new(1, 5.5, 30.0, Side::BUY);
     // orderbook.insert_order(new_order);
