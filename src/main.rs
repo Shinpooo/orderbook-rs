@@ -7,6 +7,9 @@ use std::{
 
 use futures_util::{future, StreamExt, TryStreamExt};
 use tokio::net::{TcpListener, TcpStream};
+
+use serde::Deserialize;
+use tokio_tungstenite::tungstenite::protocol::Message;
 macro_rules! log_match {
     ($side:expr, $taker_id:expr, $maker_id:expr, $price:expr, $amount:expr) => {
         println!(
@@ -16,7 +19,8 @@ macro_rules! log_match {
     };
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 enum Side {
     BUY,
     SELL,
@@ -328,6 +332,13 @@ impl Orderbook {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum ClientMessage {
+    #[serde(rename = "create_order")]
+    CreateOrder { price: f64, amount: f64, side: Side },
+}
+
 async fn accept_connection(stream: TcpStream) {
     let peer_address = stream.peer_addr().expect("Peer should have an address.");
     println!("Peer address: {}", peer_address);
@@ -336,24 +347,54 @@ async fn accept_connection(stream: TcpStream) {
         .await
         .expect("Error during the websocket handshake");
 
-    print!("New websocket connection established.");
+    println!("New websocket connection established.");
 
     let (write, mut read) = ws_stream.split();
 
-    loop {
-        match read.next().await {
-            Some(Ok(msg)) => {
-                println!("Received message: {}", msg);
+    while let Some(msg_result) = read.next().await {
+        match msg_result {
+            Ok(Message::Text(text)) => {
+                // Try to parse as our ClientMessage
+                match serde_json::from_str::<ClientMessage>(&text) {
+                    Ok(ClientMessage::CreateOrder {
+                        price,
+                        amount,
+                        side,
+                    }) => {
+                        println!(
+                            "📦 create_order → price={}, amount={}, side={:?}",
+                            price, amount, side
+                        );
+                        // → call your orderbook.insert_order(...)
+                    }
+                    // Ok(ClientMessage::CancelOrder { id }) => {
+                    //     println!("❌ cancel_order → id={}", id);
+                    //     // → call your orderbook.cancel_order(id)
+                    // }
+                    Err(e) => {
+                        eprintln!("⚠️ malformed JSON message: {}\n  raw: {}", e, text);
+                        // optionally send an error back to client
+                    }
+                }
             }
-            Some(Err(e)) => {
-                println!("Received error: {}", e);
+
+            Ok(Message::Close(frame)) => {
+                println!("👋 Client closed connection: {:?}", frame);
+                break;
             }
-            None => {
-                println!("Received None msg, closing connection");
+
+            Ok(other) => {
+                println!("🔷 ignoring non‐text WebSocket message: {:?}", other);
+            }
+
+            Err(e) => {
+                eprintln!("❌ WebSocket error: {}", e);
                 break;
             }
         }
     }
+
+    println!("🛑 Connection handler exiting");
 }
 
 #[tokio::main]
